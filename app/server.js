@@ -7,7 +7,12 @@ let GitHubStrategy = require('passport-github2').Strategy;
 let partials = require('express-partials');
 let methodOverride = require('method-override');
 let session = require('express-session');
-
+let request = require('request');
+let http = require('http');
+let pg = require('pg');
+let connectionString = process.env.DATABASE_URL || 'postgresql://postgres:mojehaslo12345678@localhost/githubDB';
+const client = new pg.Client(connectionString);
+client.connect();
 
 let GITHUB_CLIENT_ID = '5301c2ab0614cc72f15c';
 let GITHUB_CLIENT_SECRET = 'be52db4573cf12873a57117e59848307e0f0a37d';
@@ -55,38 +60,47 @@ app.use(express.static(__dirname + '/public'));
 
 app.get('/', (req, res) => res.render('index', { user: req.user }));
 
-app.get('/account', ensureAuthenticated, (req, res) => {
-  res.locals.user = (req.user);
-  res.render('account');
-  // console.log('user', req);
-});
-
 app.get('/login', (req, res) => {
   res.render('login', { user: req.user });
-  // console.log(req.user);
 });
 
-app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }), (req, res) => { });
+app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }), (req, res) => { /*tutaj nigdy nie bedziemy, idz do callback*/ });
 
 app.get('/auth/github/callback', passport.authenticate('github', { failureRedirect: '/login' }), (req, res) => {
-  // console.log('redirecting to /\n\n');
   res.redirect('/account');
 });
 
-app.get('/user/repos', passport.authenticate('github', { scope: ['user:email'] }), (req, res) => {
-  console.log('list-repos')
-  console.log('req req req req req req req req req req req req req req ', req);
-  console.log('res res res res res res res res res res res res res res ', res)
+app.get('/account', ensureAuthenticated, (req, res) => {
+  res.locals.user = (req.user);
+  res.render('account');
+});
 
-  // app.get('/user/repos', (req, res) => {
-  //   console.log('req req req req req req req req req req req req req req ', req);
-  //   console.log('res res res res res res res res res res res res res res ', res)
-  //   // res.send('hello world');
-  //   res.render('repositories');
+app.get('/repositories', ensureAuthenticated, (req, res) => {
+  request({
+    headers: { 'user-agent': 'node.js' },
+    uri: 'https://api.github.com/users/wasylewski/repos',
+    method: 'GET'
+  }, (error, response, body) => {
+    // sprawdz czy te repositories sie zmienily
+    // zapisz to do bazy danych
+    pg.connect(connectionString, (err, client, done) => {
+      console.log(err, client, done);
+    });
 
-  // })
-  // res.render('repositories', { repo: req.} ))
-  // res.render('repositories');
+    res.render('repositories', { body: body });
+  })
+});
+
+app.get('/issues', ensureAuthenticated, (req, res) => {
+  request({
+    headers: { 'user-agent': 'node.js' },
+    uri: 'https://api.github.com/repos/wasylewski/node-assignment/issues',
+    method: 'GET'
+  }, (error, response, body) => {
+    res.render('issues', { body: body });
+
+
+  });
 });
 
 app.get('/logout', (req, res) => {
@@ -98,7 +112,6 @@ app.listen(3000);
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) { return next(); }
-  // console.log('user lacks autentication\n\n');
   res.redirect('/login');
 }
 
