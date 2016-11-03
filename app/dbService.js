@@ -8,7 +8,7 @@ class DBService {
 
   }
 
-  queryDatabase(queryString) {
+  queryDatabase(queryString) { 
     return new Promise((resolve, reject) => {
       let resultQuery = null;
       this.client = new pg.Client(this.connectionString);
@@ -16,7 +16,7 @@ class DBService {
 
       const query = this.client.query(queryString, (err, result) => {
         if (err) { reject(queryString + err); }
-        if (result) console.log('query result', result);
+        // if (result) console.log('query result', result);
       });
       query.on('row', (row) => {
         resultQuery = row;

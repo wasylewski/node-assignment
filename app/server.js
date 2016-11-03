@@ -11,11 +11,16 @@ let session = require('express-session');
 let request = require('request');
 let http = require('http');
 // let pg = require('pg');
+let coForEach = require('co-foreach');
+let Q = require('q');
+var co = require('co');
 let RequestClient = require('./requestService');
 let requestClient = new RequestClient();
 let User = require('./user.js');
 let DBService = require('./dbService');
 let dbService = new DBService();
+
+const ensureAuthenticated = require('./middlewares/ensureAuthenticated');
 
 //postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
 // let connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost/githubDB';
@@ -78,83 +83,78 @@ app.get('/auth/github/callback', passport.authenticate('github', { failureRedire
   res.redirect('/account');
 });
 
-app.get('/account', ensureAuthenticated, (req, res) => {
-  res.locals.user = (req.user);
-  let data = req.user._json;
+app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
+  try {
+    const user = req.user;
 
-  let queryString = `UPDATE user_details set login='${data.login}', github_user_id=${data.id}, html_url='${data.html_url}', repos_url='${data.repos_url}', token='${token}' where EXISTS (SELECT * FROM user_details WHERE user_details.github_user_id = ${data.id});
-      INSERT INTO user_details (login, github_user_id, html_url, repos_url, token)  
-      SELECT '${data.login}', ${data.id}, '${data.html_url}', '${data.repos_url}', '${token}'
-      WHERE NOT EXISTS (SELECT 1 FROM user_details WHERE user_details.github_user_id = ${data.id});`
+    let queryString = `UPDATE user_details set login='${user.login}', github_user_id=${user.id}, html_url='${user.html_url}', repos_url='${user.repos_url}', token='${token}' where EXISTS (SELECT * FROM user_details WHERE user_details.github_user_id = ${user.id});
+        INSERT INTO user_details (login, github_user_id, html_url, repos_url, token)  
+        SELECT '${user.login}', ${user.id}, '${user.html_url}', '${user.repos_url}', '${token}'
+        WHERE NOT EXISTS (SELECT 1 FROM user_details WHERE user_details.github_user_id = ${user.id});`
 
-  dbService.queryDatabase(queryString);
-  setUser(data.login);
-  res.render('account');
-});
+    yield dbService.queryDatabase(queryString);
+
+    res.render('account', { user, title: 234 });
+  } catch (e) {
+    printMessage('got error', e);
+  }
+}));
+
+
 
 app.get('/repositories', ensureAuthenticated, (req, res) => {
 
   const storeRepositories = (body) => {
-    return new Promise((resolve, reject) => {
-      let repositories = JSON.parse(body);
-
-      repositories.forEach((item, index) => {
-        let queryString = `UPDATE repositories set git_project_id='${item.id}', project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}'
+    let repositories = JSON.parse(body);
+    coForEach(repositories, function* (item, index) {
+      let queryString = `UPDATE repositories set git_project_id='${item.id}', project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}'
           where EXISTS (SELECT * FROM repositories WHERE repositories.git_project_id = ${item.id});
 
           INSERT INTO repositories (git_project_id, project_name, full_project_name, html_url, description, api_url)
           SELECT '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
           WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`
 
-        dbService.queryDatabase(queryString);
+      yield dbService.queryDatabase(queryString);
 
-        if (index === repositories.length - 1) resolve(repositories);
-
-      })
     })
+    res.render('repositories', { repositories: repositories });
   }
 
-  const displayRepositories = (repositories) => res.render('repositories', { repositories: repositories });
+  try {
+    requestClient.get(`https://api.github.com/users/${req.user.username}/repos`)
+      .then(storeRepositories)
+  } catch (e) {
+    printMessage('got error', e);
+  }
 
-  requestClient.get(`https://api.github.com/users/${user.login}/repos`)
-    .then(storeRepositories)
-    .then(displayRepositories)
-    .catch(onError);
 });
 
 
 app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
-  printMessage('user.userId', user.userId);
 
   const storeIssues = (body) => {
-    return new Promise((resolve, reject) => {
-      let issues = JSON.parse(body);
+    let issues = JSON.parse(body);
 
-      issues.forEach((item, index) => {
-        let queryString = `UPDATE issues set url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${item.description}', user_id='${user.userId}' body='${item.body}'
+    coForEach(issues, function* (item, index) {
+      let queryString = `UPDATE issues set url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${item.description}', user_id='${user.userId}' body='${item.body}'
         WHERE EXISTS(SELECT * FROM issues WHERE issues.git_issue_id=${item.id});
 
         INSERT INTO issues (url, repository_url, git_issue_id, title, user_id, user_id, body)
         SELECT '${item.url}', '${item.repository_url}', ${item.id}, '${item.title}', '${item.description}', ${user.userId}, '${item.body}'
         WHERE NOT EXISTS (SELECT 1 FROM issues WHERE issues.git_issue_id=${item.id});`
 
-        dbService.queryDatabase(queryString)
-          .catch((responseQuery) => { return reject(responseQuery) });
-
-        printMessage('going further, not exiting');
-
-        if (index === issues.length) { console.log(index, issues.length); return resolve(issues);}
-
-      })
-
+      yield dbService.queryDatabase(queryString);
     })
-
+    res.render('issues', { issues: issues })
   }
 
-  requestClient.get(`https://api.github.com/repos/${user.login}/${req.params.name}/issues`)
-    .then(storeIssues)
-    .then((res) => console.log('success storeIssues', res))
-    .catch(onError)
+  try {
+    requestClient.get(`https://api.github.com/repos/${req.user.username}/${req.params.name}/issues`)
+      .then(storeIssues);
+
+  } catch (e) {
+    printMessage('got error', e);
+  }
 
 });
 
@@ -165,10 +165,33 @@ app.get('/logout', (req, res) => {
 
 function setUser(data) {
   let queryString = `SELECT ud.* FROM user_details as ud where ud.login = '${data}'`;
-  let result = dbService.queryDatabase(queryString)
-    .then((data) => user = new User(data.token, data.id, data.login))
-    .catch((res) => printMessage('error account', res));
+  co(function* () {
+    let result = Promise.resolve(dbService.queryDatabase(queryString))
+      .then((data) => {
+        console.log(data);
+        // yield data;
+      })
+    // console.log(result);
+    yield result;
+  })
+    .then((data) => {
+      printMessage('setting user'); console.log(data);
+      user = new User(data.token, data.id, data.login)
+      printMessage('user setup');
+    })
+    .catch((err) => printMessage('user is giving errors', err));
+
+  // let result = dbService.queryDatabase(queryString)
+  //   .then((data) => user = new User(data.token, data.id, data.login))
+  //   .catch((res) => printMessage('error account', res));
 }
+
+// function setUser(data) {
+//   let queryString = `SELECT ud.* FROM user_details as ud where ud.login = '${data}'`;
+//   let result = dbService.queryDatabase(queryString)
+//     .then((data) => user = new User(data.token, data.id, data.login))
+//     .catch((res) => printMessage('error account', res));
+// }
 
 // function queryDatabase(queryString) {
 //   let resultQuery = null; 
@@ -192,62 +215,14 @@ function setUser(data) {
 
 app.listen(3000);
 
-function ensureAuthenticated(req, res, next) {
-  if (req.isAuthenticated()) { return next(); }
-  res.redirect('/login');
-}
-
 function printMessage(name, obj) {
   // console.dir('\n', { depth: null, colors: true })
   console.dir(name, { depth: null, colors: true });
-  console.dir(obj, { depth: null, colors: true });
+  if (obj) console.dir(obj, { depth: null, colors: true });
 
 }
 
-const onError = (res) => printMessage('onError', res);
+const onError = (res) => {
+  printMessage('onError', res);
+};
 
-
-
-// uzyteczny kod
-  // request({
-  //   headers: { 'user-agent': 'node.js' },
-  //   uri: 'https://api.github.com/users/wasylewski/repos',
-  //   method: 'GET'
-  // }, (error, response, body) => {
-
-  //   let obj = JSON.parse(body);
-
-  //   obj.forEach((item) => {
-  //     // console.log(item.id); // git project id
-  //     // console.log(item.name) // project name
-  //     // console.log(item.full_name) // full project name
-  //     // console.log(item.html_url) //  html_url
-  //     // console.log(item.description) // description
-  //     // console.log(item.url) // api-url
-
-  //     let queryString = `UPDATE repositories set git_project_id='${item.id}', project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}'
-  //     where EXISTS (SELECT * FROM repositories WHERE repositories.git_project_id = ${item.id});
-
-  //     INSERT INTO repositories (git_project_id, project_name, full_project_name, html_url, description, api_url)
-  //     SELECT '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
-  //     WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`
-
-  //     queryDatabase(queryString);
-
-  //   })
-
-  //   res.render('repositories', { body: body });
-  // })
-
-
-
-    // get(url) {
-  //   this.request({
-  //     headers: { 'user-agent': 'node.js' },
-  //     uri: url,
-  //     method: 'GET'
-  //   }, (error, response, body) => {
-  //     if (error) return null;
-  //     return body;
-  //   })
-  // }
