@@ -10,7 +10,6 @@ let methodOverride = require('method-override');
 let session = require('express-session');
 let request = require('request');
 let http = require('http');
-// let pg = require('pg');
 let coForEach = require('co-foreach');
 let Q = require('q');
 var co = require('co');
@@ -24,8 +23,6 @@ const ensureAuthenticated = require('./middlewares/ensureAuthenticated');
 
 //postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
 // let connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost/githubDB';
-let user = null;
-let token = null;
 
 let GITHUB_CLIENT_ID = '5301c2ab0614cc72f15c';
 let GITHUB_CLIENT_SECRET = 'be52db4573cf12873a57117e59848307e0f0a37d';
@@ -40,10 +37,7 @@ passport.use(new GitHubStrategy({
   callbackURL: "http://127.0.0.1:3000/auth/github/callback"
 },
   (accessToken, refreshToken, profile, done) => {
-    token = accessToken;
-    // console.log('accessToken', accessToken);
-    // console.log('refreshToken', refreshToken);
-    // console.log(profile);
+    profile._json.token = accessToken; 
 
     process.nextTick(() => {
       return done(null, profile);
@@ -51,13 +45,9 @@ passport.use(new GitHubStrategy({
   }
 ));
 
-////
-
-var app = express();
-
-// console.log(__dirname);
 
 // configure Express
+var app = express();
 app.set('views', __dirname + '/views');
 app.set('view engine', 'ejs');
 app.use(partials());
@@ -84,35 +74,47 @@ app.get('/auth/github/callback', passport.authenticate('github', { failureRedire
 });
 
 app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
-  try {
-    const user = req.user;
+  try { 
+    const user = req.user._json;
+    printMessage('user', user);
 
-    let queryString = `UPDATE user_details set login='${user.login}', github_user_id=${user.id}, html_url='${user.html_url}', repos_url='${user.repos_url}', token='${token}' where EXISTS (SELECT * FROM user_details WHERE user_details.github_user_id = ${user.id});
+    let queryString = `UPDATE user_details set login='${user.login}', github_user_id=${user.id}, html_url='${user.html_url}', repos_url='${user.repos_url}', token='${user.token}' where EXISTS (SELECT * FROM user_details WHERE user_details.github_user_id = ${user.id});
         INSERT INTO user_details (login, github_user_id, html_url, repos_url, token)  
-        SELECT '${user.login}', ${user.id}, '${user.html_url}', '${user.repos_url}', '${token}'
-        WHERE NOT EXISTS (SELECT 1 FROM user_details WHERE user_details.github_user_id = ${user.id});`
+        SELECT '${user.login}', ${user.id}, '${user.html_url}', '${user.repos_url}', '${user.token}'
+        WHERE NOT EXISTS (SELECT 1 FROM user_details WHERE user_details.github_user_id = ${user.id});
 
-    yield dbService.queryDatabase(queryString);
+        SELECT user_details.id, roles.name as roleName FROM user_details, roles
+        WHERE user_details.github_user_id = ${user.id}
+        AND user_details.role_id = roles.id;`;
 
-    res.render('account', { user, title: 234 });
+    user.userDetails = yield dbService.queryDatabase(queryString);
+    req.session.user = user;
+    printMessage('user after log in', user);
+    printMessage('user.userDetails', user.userDetails.rolename)
+    
+    res.render('account', { user, title: 'Moje konto', roleName: user.userDetails.rolename });
+
   } catch (e) {
     printMessage('got error', e);
   }
 }));
 
 
-
 app.get('/repositories', ensureAuthenticated, (req, res) => {
+
+  const user = req.session.user;
 
   const storeRepositories = (body) => {
     let repositories = JSON.parse(body);
-    coForEach(repositories, function* (item, index) {
-      let queryString = `UPDATE repositories set git_project_id='${item.id}', project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}'
-          where EXISTS (SELECT * FROM repositories WHERE repositories.git_project_id = ${item.id});
+      // `UPDATE repositories set git_project_id='${item.id}', project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}'
+      //     where EXISTS (SELECT * FROM repositories WHERE repositories.git_project_id = ${item.id});
 
-          INSERT INTO repositories (git_project_id, project_name, full_project_name, html_url, description, api_url)
-          SELECT '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
+    coForEach(repositories, function* (item, index) {
+      let queryString = `INSERT INTO repositories (user_id, git_project_id, project_name, full_project_name, html_url, description, api_url)
+          SELECT '${user.userDetails.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
           WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`
+
+          printMessage(queryString);
 
       yield dbService.queryDatabase(queryString);
 
@@ -132,18 +134,22 @@ app.get('/repositories', ensureAuthenticated, (req, res) => {
 
 app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
 
-  const storeIssues = (body) => {
-    let issues = JSON.parse(body);
+  const user = req.session.user;
+
+  const storeIssues = (body) => { 
+    let issues = JSON.parse(body); 
+    printMessage(issues);
+    // issues.ForEach((item) => console.log(item));
+      // `UPDATE issues set url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${item.description}', user_id='${user.userId}' body='${item.body}'
+      //   WHERE EXISTS(SELECT * FROM issues WHERE issues.git_issue_id=${item.id});
 
     coForEach(issues, function* (item, index) {
-      let queryString = `UPDATE issues set url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${item.description}', user_id='${user.userId}' body='${item.body}'
-        WHERE EXISTS(SELECT * FROM issues WHERE issues.git_issue_id=${item.id});
-
-        INSERT INTO issues (url, repository_url, git_issue_id, title, user_id, user_id, body)
-        SELECT '${item.url}', '${item.repository_url}', ${item.id}, '${item.title}', '${item.description}', ${user.userId}, '${item.body}'
+      let queryString = `INSERT INTO issues (url, repository_url, git_issue_id, title, user_id, body)
+        SELECT '${item.url}', '${item.repository_url}', ${item.id}, '${item.title}', ${user.userDetails.id}, '${item.body}'
         WHERE NOT EXISTS (SELECT 1 FROM issues WHERE issues.git_issue_id=${item.id});`
 
       yield dbService.queryDatabase(queryString);
+
     })
     res.render('issues', { issues: issues })
   }
@@ -163,60 +169,9 @@ app.get('/logout', (req, res) => {
   res.redirect('/');
 });
 
-function setUser(data) {
-  let queryString = `SELECT ud.* FROM user_details as ud where ud.login = '${data}'`;
-  co(function* () {
-    let result = Promise.resolve(dbService.queryDatabase(queryString))
-      .then((data) => {
-        console.log(data);
-        // yield data;
-      })
-    // console.log(result);
-    yield result;
-  })
-    .then((data) => {
-      printMessage('setting user'); console.log(data);
-      user = new User(data.token, data.id, data.login)
-      printMessage('user setup');
-    })
-    .catch((err) => printMessage('user is giving errors', err));
-
-  // let result = dbService.queryDatabase(queryString)
-  //   .then((data) => user = new User(data.token, data.id, data.login))
-  //   .catch((res) => printMessage('error account', res));
-}
-
-// function setUser(data) {
-//   let queryString = `SELECT ud.* FROM user_details as ud where ud.login = '${data}'`;
-//   let result = dbService.queryDatabase(queryString)
-//     .then((data) => user = new User(data.token, data.id, data.login))
-//     .catch((res) => printMessage('error account', res));
-// }
-
-// function queryDatabase(queryString) {
-//   let resultQuery = null; 
-//   const client = new pg.Client(connectionString);
-//   client.connect();
-
-//   const query = client.query(queryString, (err, result) => {
-//     if (err) printMessage('err', err);
-//     // if (result) console.log(result);
-//   });
-//   query.on('row', (row) => {
-//     resultQuery = row;
-//     printMessage('resultQuery', resultQuery)
-//   })
-//   query.on('end', () => {
-//     client.end();
-//   })
-//   console.log( 'resultQuery', resultQuery);
-//   return resultQuery;
-// }
-
 app.listen(3000);
 
 function printMessage(name, obj) {
-  // console.dir('\n', { depth: null, colors: true })
   console.dir(name, { depth: null, colors: true });
   if (obj) console.dir(obj, { depth: null, colors: true });
 
