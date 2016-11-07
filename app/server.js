@@ -3,8 +3,9 @@
 let util = require('util');
 let express = require('express');
 let passport = require('passport');
-let bodyParser = require('body-parser');
 let GitHubStrategy = require('passport-github2').Strategy;
+let LocalStrategy = require('passport-local').Strategy;
+let bodyParser = require('body-parser');
 let partials = require('express-partials');
 let methodOverride = require('method-override');
 let session = require('express-session');
@@ -45,6 +46,15 @@ passport.use(new GitHubStrategy({
   }
 ));
 
+passport.use(new LocalStrategy( (username, password, done)=> {
+  printMessage(username, password);
+
+
+  done();
+  // query database to get user details
+  
+}))
+
 
 // configure Express
 var app = express();
@@ -66,6 +76,11 @@ app.get('/', (req, res) => res.render('index', { user: req.user }));
 app.get('/login', (req, res) => {
   res.render('login', { user: req.user });
 });
+
+app.post('/login-user', (req, res) => {
+  passport.authenticate('local', {successRedirect: '/account', failureRedirect: '/login', failureFlash: true })
+
+})
 
 app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }), (req, res) => { /*tutaj nigdy nie bedziemy, idz do callback*/ });
 
@@ -161,6 +176,12 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
   } catch (e) {
     printMessage('got error', e);
   }
+
+});
+
+app.get(`/packages`, ensureAuthenticated, (req, res) => { 
+
+  
 
 });
 
