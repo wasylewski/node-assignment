@@ -1,7 +1,39 @@
 <a href="/">Home</a> | <a href="/logout">Log Out</a>
 
 
-<% if (roleName !== 'basic') { %>
+<% if (roleName === 'basic') { %>
+    <h1><%- title %></h1>
+    <p> Hello <%- user.login %></p>
+
+    <p>
+        <a href='<%- user.html_url %>'> html_url </a>
+    </p>
+
+    <p>
+        <a href='<%- user.repos_url %>'> repos_url </a>
+    </p>
+
+
+    <p> Wszystkie dane usera <%- JSON.stringify(user) %></p>
+
+    <p><a href="/repositories">List my repositories</a></p>
+<% } else if (roleName === 'supporter'){ %>
+     
+    <p>
+        <a href="/create-packages">Create new Packages</a></p>
+    </p
+
+<% } else { %>
+    <h2>Unfortunatey you dont have permissions to look at the account</h2>
+    <p>
+        <a href="/login">Please log in </a>
+    </p>
+
+<% } %>
+
+
+
+<!--<% if (roleName !== 'basic') { %>
     <h2>Unfortunatey you dont have permissions to look at the account</h2>
     <p>
         <a href="/login">Please log in </a>
@@ -22,7 +54,7 @@
     <p> Wszystkie dane usera <%- JSON.stringify(user) %></p>
 
     <p><a href="/repositories">List my repositories</a></p>
-<% } %>
+<% } %>-->
 
 <h3> Rola typu: <%- roleName %> </h3>
 

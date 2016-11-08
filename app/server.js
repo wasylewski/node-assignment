@@ -194,11 +194,14 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
 
 });
 
-app.get(`/packages`, ensureAuthenticated, (req, res) => { 
+app.get(`/create-packages`, ensureAuthenticated, co.wrap(function*(req, res) { 
 
-  
 
-});
+ yield dbService.queryDatabase(queryString)
+
+  res.render('packages');
+
+}));
 
 app.get('/logout', (req, res) => {
   req.logout();
