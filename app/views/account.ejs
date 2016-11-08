@@ -1,3 +1,6 @@
+<a href="/">Home</a> | <a href="/logout">Log Out</a>
+
+
 <% if (roleName !== 'basic') { %>
     <h2>Unfortunatey you dont have permissions to look at the account</h2>
     <p>
@@ -5,7 +8,6 @@
     </p>
 <% } else { %>
     <h1><%- title %></h1>
-    <a href="/logout">Log Out</a>
     <p> Hello <%- user.login %></p>
 
     <p>

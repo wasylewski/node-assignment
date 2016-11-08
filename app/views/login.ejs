@@ -1,3 +1,5 @@
+<p><a href="/">Home</a> </p>
+
 <form action="/login-user" method="post">
     <div>
         <label>Username:</label>
@@ -16,7 +18,7 @@
 
 
 <% if (login_errors.length > 0) { %>
-  <h2>Try log in again.</h2>
-  <h3> <%- login_errors %></h3>
+    <h2>Try to log in again.</h2>
+    <h3> <%- login_errors %></h3>
 <% } %>
 

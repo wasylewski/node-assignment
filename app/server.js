@@ -22,8 +22,6 @@ let dbService = new DBService();
 
 const ensureAuthenticated = require('./middlewares/ensureAuthenticated');
 
-//postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
-// let connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost/githubDB';
 
 let GITHUB_CLIENT_ID = '5301c2ab0614cc72f15c';
 let GITHUB_CLIENT_SECRET = 'be52db4573cf12873a57117e59848307e0f0a37d';
@@ -38,23 +36,33 @@ passport.use(new GitHubStrategy({
   callbackURL: "http://127.0.0.1:3000/auth/github/callback"
 },
   (accessToken, refreshToken, profile, done) => {
-    profile._json.token = accessToken; 
 
-    process.nextTick(() => {
-      return done(null, profile);
-    });
+    let queryString = `select ud.*, roles.name as rolename from user_details as ud, roles
+                      where ud.login = '${profile._json.login}'
+                      and roles.id = ud.role_id`;
+  
+    const setUserProfile = (user) => {
+      user.token = accessToken;
+      process.nextTick(() => {
+        return done(null, user);
+      });
+    }
+ 
+    dbService.queryDatabase(queryString)
+      .then(setUserProfile); 
   }
 ));
 
 passport.use(new LocalStrategy( co.wrap(function*(username, password, done) {
 
-  let queryString = `SELECT ud.* from user_details as ud 
-      where ud.login = '${username}'
-      and ud.password = '${password}';`
+  let queryString = `SELECT ud.*, roles.name as rolename from user_details as ud, roles 
+      where (ud.login = '${username}'
+      and ud.password = '${password}')
+      and roles.id = ud.role_id;`
 
   let user = yield dbService.queryDatabase(queryString);
   
-  if (!user) return done(null, false, {message: 'bad password'});
+  if (!user) return done(null, false);
 
   return done(null, user);
 
@@ -76,7 +84,22 @@ app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.static(__dirname + '/public'));
 
-app.get('/', (req, res) => res.render('index', { user: req.user }));
+app.get('/', (req, res) => {
+  req.session.user = req.user;
+
+  const displayRepositories = (results) => {
+    results = JSON.parse(results);
+    res.render('index', { user: req.user, repositories: results});
+  }
+
+  try {
+    requestClient.get(`https://api.github.com/repositories?since=364`)
+      .then(displayRepositories)
+  } catch (e) {
+    printMessage('got error', e);
+  }
+
+});
 
 app.get('/login', (req, res) => {
   let errorMessage = req.session.messages;
@@ -96,39 +119,20 @@ app.post('/login-user',
 app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }), (req, res) => { /*tutaj nigdy nie bedziemy, idz do callback*/ });
 
 app.get('/auth/github/callback', passport.authenticate('github', { failureRedirect: '/login' }), (req, res) => {
-  res.redirect('/account');
+  res.redirect('/');
 });
 
-app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
-  try { 
-    const user = req.user._json;
-    printMessage('user', user);
+app.get('/account', ensureAuthenticated, function (req, res) {
+  
+  const user = req.session.user;
+  res.render('account', { user, title: 'Moje konto', roleName: user.rolename });
 
-    let queryString = `UPDATE user_details set login='${user.login}', github_user_id=${user.id}, html_url='${user.html_url}', repos_url='${user.repos_url}', token='${user.token}' where EXISTS (SELECT * FROM user_details WHERE user_details.github_user_id = ${user.id});
-        INSERT INTO user_details (login, github_user_id, html_url, repos_url, token)  
-        SELECT '${user.login}', ${user.id}, '${user.html_url}', '${user.repos_url}', '${user.token}'
-        WHERE NOT EXISTS (SELECT 1 FROM user_details WHERE user_details.github_user_id = ${user.id});
-
-        SELECT user_details.id, roles.name as roleName FROM user_details, roles
-        WHERE user_details.github_user_id = ${user.id}
-        AND user_details.role_id = roles.id;`;
-
-    user.userDetails = yield dbService.queryDatabase(queryString);
-    req.session.user = user;
-    printMessage('user after log in', user);
-    printMessage('user.userDetails', user.userDetails.rolename)
-    
-    res.render('account', { user, title: 'Moje konto', roleName: user.userDetails.rolename });
-
-  } catch (e) {
-    printMessage('got error', e);
-  }
-}));
-
+});
 
 app.get('/repositories', ensureAuthenticated, (req, res) => {
 
   const user = req.session.user;
+  printMessage(user);
 
   const storeRepositories = (body) => {
     let repositories = JSON.parse(body);
@@ -137,7 +141,7 @@ app.get('/repositories', ensureAuthenticated, (req, res) => {
 
     coForEach(repositories, function* (item, index) {
       let queryString = `INSERT INTO repositories (user_id, git_project_id, project_name, full_project_name, html_url, description, api_url)
-          SELECT '${user.userDetails.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
+          SELECT '${user.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
           WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`;
 
           printMessage(queryString);
@@ -149,7 +153,7 @@ app.get('/repositories', ensureAuthenticated, (req, res) => {
   }
 
   try {
-    requestClient.get(`https://api.github.com/users/${req.user.username}/repos`)
+    requestClient.get(`https://api.github.com/users/${user.login}/repos`)
       .then(storeRepositories)
   } catch (e) {
     printMessage('got error', e);
@@ -171,7 +175,7 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
 
     coForEach(issues, function* (item, index) {
       let queryString = `INSERT INTO issues (url, repository_url, git_issue_id, title, user_id, body)
-        SELECT '${item.url}', '${item.repository_url}', ${item.id}, '${item.title}', ${user.userDetails.id}, '${item.body}'
+        SELECT '${item.url}', '${item.repository_url}', ${item.id}, '${item.title}', ${user.id}, '${item.body}'
         WHERE NOT EXISTS (SELECT 1 FROM issues WHERE issues.git_issue_id=${item.id});`
 
       yield dbService.queryDatabase(queryString);
@@ -181,7 +185,7 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
   }
 
   try {
-    requestClient.get(`https://api.github.com/repos/${req.user.username}/${req.params.name}/issues`)
+    requestClient.get(`https://api.github.com/repos/${user.login}/${req.params.name}/issues`)
       .then(storeIssues);
 
   } catch (e) {
