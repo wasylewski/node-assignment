@@ -46,14 +46,19 @@ passport.use(new GitHubStrategy({
   }
 ));
 
-passport.use(new LocalStrategy( (username, password, done)=> {
-  printMessage(username, password);
+passport.use(new LocalStrategy( co.wrap(function*(username, password, done) {
 
+  let queryString = `SELECT ud.* from user_details as ud 
+      where ud.login = '${username}'
+      and ud.password = '${password}';`
 
-  done();
-  // query database to get user details
+  let user = yield dbService.queryDatabase(queryString);
   
-}))
+  if (!user) return done(null, false);
+
+  return done(null, user);
+
+})));
 
 
 // configure Express
@@ -77,10 +82,14 @@ app.get('/login', (req, res) => {
   res.render('login', { user: req.user });
 });
 
-app.post('/login-user', (req, res) => {
-  passport.authenticate('local', {successRedirect: '/account', failureRedirect: '/login', failureFlash: true })
+app.post('/login-user', 
+  passport.authenticate('local', { 
+    successRedirect: '/', 
+    failureRedirect: '/login', 
+    failureFlash: true 
+  })
 
-})
+);
 
 app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }), (req, res) => { /*tutaj nigdy nie bedziemy, idz do callback*/ });
 
@@ -127,7 +136,7 @@ app.get('/repositories', ensureAuthenticated, (req, res) => {
     coForEach(repositories, function* (item, index) {
       let queryString = `INSERT INTO repositories (user_id, git_project_id, project_name, full_project_name, html_url, description, api_url)
           SELECT '${user.userDetails.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
-          WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`
+          WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`;
 
           printMessage(queryString);
 

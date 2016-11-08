@@ -15,8 +15,8 @@ class DBService {
       this.client.connect();
 
       const query = this.client.query(queryString, (err, result) => {
-        if (err) { reject(queryString + err); }
-        // if (result) console.log('query result', result);
+        if (err) { console.log('reject query error', err); reject(queryString + err); }
+        if (result) console.log('query result', result.rows);
       });
       query.on('row', (row) => {
         resultQuery = row;
