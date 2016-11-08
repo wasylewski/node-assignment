@@ -12,5 +12,11 @@
     </div>
 </form>
 
-
 <a href="/auth/github">Or login with GitHub</a>
+
+
+<% if (login_errors.length > 0) { %>
+  <h2>Try log in again.</h2>
+  <h3> <%- login_errors %></h3>
+<% } %>
+

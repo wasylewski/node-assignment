@@ -54,7 +54,7 @@ passport.use(new LocalStrategy( co.wrap(function*(username, password, done) {
 
   let user = yield dbService.queryDatabase(queryString);
   
-  if (!user) return done(null, false);
+  if (!user) return done(null, false, {message: 'bad password'});
 
   return done(null, user);
 
@@ -79,14 +79,16 @@ app.use(express.static(__dirname + '/public'));
 app.get('/', (req, res) => res.render('index', { user: req.user }));
 
 app.get('/login', (req, res) => {
-  res.render('login', { user: req.user });
+  let errorMessage = req.session.messages;
+  req.session.messages = [];
+  res.render('login', { login_errors: errorMessage || [] });
 });
 
 app.post('/login-user', 
   passport.authenticate('local', { 
     successRedirect: '/', 
     failureRedirect: '/login', 
-    failureFlash: true 
+    failureMessage: 'Invalid username or password' 
   })
 
 );
