@@ -5,7 +5,7 @@ class RequestClient {
     this.request = require('request');
   }
 
-  get(url) { console.log(url);
+  get(url) { 
     return new Promise((resolve, reject) => {
       this.request({
         headers: { 'user-agent': 'node.js' },

@@ -169,15 +169,12 @@ app.get('/repositories', ensureAuthenticated, (req, res) => {
 
   const storeRepositories = (body) => {
     let repositories = JSON.parse(body);
-      // `UPDATE repositories set git_project_id='${item.id}', project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}'
-      //     where EXISTS (SELECT * FROM repositories WHERE repositories.git_project_id = ${item.id});
 
     coForEach(repositories, function* (item, index) {
       let queryString = `INSERT INTO repositories (user_id, git_project_id, project_name, full_project_name, html_url, description, api_url)
-          SELECT '${user.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
-          WHERE NOT EXISTS (SELECT 1 FROM repositories WHERE repositories.git_project_id = ${item.id});`;
-
-          printMessage(queryString);
+        SELECT '${user.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
+        ON CONFLICT (git_project_id) DO UPDATE
+        SET project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}';`
 
       yield dbService.queryDatabase(queryString);
 
@@ -202,14 +199,12 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
   const storeIssues = (body) => { 
     let issues = JSON.parse(body); 
     printMessage(issues);
-    // issues.ForEach((item) => console.log(item));
-      // `UPDATE issues set url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${item.description}', user_id='${user.userId}' body='${item.body}'
-      //   WHERE EXISTS(SELECT * FROM issues WHERE issues.git_issue_id=${item.id});
 
     coForEach(issues, function* (item, index) {
       let queryString = `INSERT INTO issues (url, repository_url, git_issue_id, title, user_id, body)
         SELECT '${item.url}', '${item.repository_url}', ${item.id}, '${item.title}', ${user.id}, '${item.body}'
-        WHERE NOT EXISTS (SELECT 1 FROM issues WHERE issues.git_issue_id=${item.id});`
+        ON CONFLICT (git_issue_id) DO UPDATE
+        SET url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${user.id}', body='${item.body}'`;
 
       yield dbService.queryDatabase(queryString);
 
