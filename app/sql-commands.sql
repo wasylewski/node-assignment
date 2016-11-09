@@ -165,3 +165,21 @@ CREATE INDEX fki_roles_fkey
   USING btree
   (role_id);
 
+
+
+-- Table: public.repositories
+
+-- DROP TABLE public.repositories;
+
+CREATE TABLE public.packages
+(
+  id serial NOT NULL,
+  name character varying(100),
+  price numeric,
+  CONSTRAINT packages_pkey PRIMARY KEY (id)
+)
+WITH (
+  OIDS=FALSE
+);
+ALTER TABLE public.packages
+  OWNER TO postgres;

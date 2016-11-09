@@ -60,8 +60,10 @@ passport.use(new LocalStrategy( co.wrap(function*(username, password, done) {
       and ud.password = '${password}')
       and roles.id = ud.role_id;`
 
-  let user = yield dbService.queryDatabase(queryString);
-  
+  let result = yield dbService.queryDatabase(queryString);
+  let user = result[0];
+  printMessage(user);
+
   if (!user) return done(null, false);
 
   return done(null, user);
@@ -122,12 +124,43 @@ app.get('/auth/github/callback', passport.authenticate('github', { failureRedire
   res.redirect('/');
 });
 
-app.get('/account', ensureAuthenticated, function (req, res) {
-  
+app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
   const user = req.session.user;
-  res.render('account', { user, title: 'Moje konto', roleName: user.rolename });
 
-});
+  let queryPackages = `SELECT * FROM packages`;
+  let queryUserPackages = `SELECT packages.name FROM packages, user_details
+                          WHERE packages.id = user_details.package_id
+                          AND user_details.id = ${user.id};`
+
+  try {  
+    let packages = yield Promise.resolve(dbService.queryDatabase(queryPackages));
+    let userPackages = yield Promise.resolve(dbService.queryDatabase(queryUserPackages));
+    res.render('account', { user, title: 'Moje konto', roleName: user.rolename, packages: packages, userPackages: userPackages });
+
+  }  
+  catch(e) {
+    res.send(e);
+    printMessage('got error' ,e);
+  }
+
+}));
+
+app.post('/account/acquire-package', ensureAuthenticated, co.wrap(function*(req, res) {
+  let formDetails = req.body;
+  let user = req.session.user;
+  printMessage('formDetails', formDetails);
+
+  try {
+    let queryString = `UPDATE user_details set package_id = ${formDetails.package_id}`;
+    yield dbService.queryDatabase(queryString);
+    res.send(`user ${user.login} acquired package ${formDetails.package_id}`)    
+  }
+  catch (e) {
+    res.send(e);
+    printMessage('got error', e);
+  }
+
+}));
 
 app.get('/repositories', ensureAuthenticated, (req, res) => {
 
@@ -194,14 +227,40 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
 
 });
 
-app.get(`/create-packages`, ensureAuthenticated, co.wrap(function*(req, res) { 
+app.get(`/packages`, ensureAuthenticated, co.wrap(function*(req, res) { 
+  
+  try {
+    let packages = [];
+    let queryString = `SELECT * FROM packages;`
+    yield dbService.queryDatabase(queryString)
+      .then((array) => array.forEach((item) => packages.push(item)));
 
+    printMessage('packages', packages.length);
+    res.render('packages', {packages: packages});
+  }
+  catch(e) {
+    res.send(e);
+    printMessage('got error', e);
+  }
+  
+}));
 
- yield dbService.queryDatabase(queryString)
+app.post(`/create-package`, ensureAuthenticated, co.wrap(function*(req, res){
 
-  res.render('packages');
+  let formDetails = req.body;
+  let queryString = `INSERT INTO public.packages (name, price) VALUES('${formDetails.name}', ${formDetails.price});`;
+
+  try {
+    yield dbService.queryDatabase(queryString);
+    res.send('package succesfully added');
+  }
+  catch (e) {
+    res.send(e);
+    printMessage('got error', e);
+  }
 
 }));
+
 
 app.get('/logout', (req, res) => {
   req.logout();
