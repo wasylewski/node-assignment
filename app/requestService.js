@@ -1,13 +1,12 @@
 'use strict'
 
-class RequestClient {
-  constructor() {
-    this.request = require('request');
-  }
+const request = require('request');
 
-  get(url) { 
+function RequestClient() {
+
+  function get(url) { 
     return new Promise((resolve, reject) => {
-      this.request({
+      request({
         headers: { 'user-agent': 'node.js' },
         uri: url,
         method: 'GET'
@@ -18,6 +17,34 @@ class RequestClient {
 
     })
   }
+
+  return {
+    get: get
+  }
 }
 
 module.exports = RequestClient;
+
+
+
+// 'use strict'
+
+// const request = require('request');
+
+// function RequestClient() {}
+
+// RequestClient.prototype.get = function(url) { 
+//   return new Promise((resolve, reject) => {
+//     this.request({
+//       headers: { 'user-agent': 'node.js' },
+//       uri: url,
+//       method: 'GET'
+//     }, (error, response, body) => {
+//       if (error) reject(error);
+//       resolve(body);
+//     })
+
+//   })
+// }
+
+// module.exports = RequestClient;
