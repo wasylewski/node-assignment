@@ -16,10 +16,13 @@ const Q = require('q');
 var co = require('co');
 const RequestClient = require('./requestService');
 const requestClient = new RequestClient();
-// printMessage(requestClient);
 const User = require('./user.js');
 const DBService = require('./dbService');
 const dbService = new DBService();
+
+const pgp = require('pg-promise')();
+let db = pgp('postgresql://postgres:postgres@localhost/githubDB');
+
 
 const ensureAuthenticated = require('./middlewares/ensureAuthenticated');
 
@@ -42,17 +45,19 @@ passport.use(new GitHubStrategy({
     const queryString = `select ud.*, roles.name as rolename from user_details as ud, roles
                       where ud.login = '${profile._json.login}'
                       and roles.id = ud.role_id`;
-  
-    const setUserProfile = (result) => {
-      let user = result[0];
+
+    const setUserProfile = (user) => {
       user.token = accessToken;
-      process.nextTick(() => {
+      process.nextTick(() => { console.log(user);
         return done(null, user);
       });
     }
- 
-    dbService.queryDatabase(queryString)
-      .then(setUserProfile); 
+
+    db.one(queryString, [true])
+      .then(setUserProfile)
+      .catch((err) => onError(err, res));
+      
+      
   }
 ));
 
@@ -61,14 +66,15 @@ passport.use(new LocalStrategy( co.wrap(function*(username, password, done) {
   const queryString = `SELECT ud.*, roles.name as rolename from user_details as ud, roles 
       where (ud.login = '${username}'
       and ud.password = '${password}')
-      and roles.id = ud.role_id;`
+      and roles.id = ud.role_id;`;
 
-  let result = yield dbService.queryDatabase(queryString);
-  let user = result[0];
+  const returnVerification = (user) => { 
+    if (!user) return done(null, false);
+    return done(null, user);
+  } 
 
-  if (!user) return done(null, false);
-
-  return done(null, user);
+  db.one(queryString)
+    .then(returnVerification);
 
 })));
 
@@ -91,7 +97,7 @@ app.use(express.static(__dirname + '/public'));
 app.get('/', (req, res) => {
   req.session.user = req.user;
 
-  const displayRepositories = (results) => {
+  const displayRepositories = (results) => { 
     results = JSON.parse(results);
     res.render('index', { user: req.user, repositories: results});
   }
@@ -127,20 +133,24 @@ app.get('/auth/github/callback', passport.authenticate('github', {
 app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
   const user = req.session.user;
 
-  let queryPackages = `SELECT * FROM packages`;
-  let queryUserPackages = `SELECT packages.name FROM packages, user_details
+  const queryPackages = `SELECT * FROM packages`;
+  const queryUserPackages = `SELECT packages.name FROM packages, user_details
                           WHERE packages.id = user_details.package_id
                           AND user_details.id = ${user.id};`
 
-  let packages, userPackages;
-  const getPackages = co.wrap(function*() { return packages = yield Promise.resolve(dbService.queryDatabase(queryPackages)) });
-  const getUserPackages = co.wrap(function*() { return userPackages = yield  Promise.resolve(dbService.queryDatabase(queryUserPackages)) });
-  const render = () =>  res.render('account', { user, title: 'Moje konto', roleName: user.rolename, packages: packages, userPackages: userPackages });
+  function* getData(t) {
+    let packages = yield t.many(queryPackages);
+    let userPackages = yield t.many(queryUserPackages);
+    return {
+      packages: packages,
+      userPackages : userPackages
+    }
+  } 
 
-  getPackages()
-    .then(getUserPackages)
-    .then(render)
-    .catch(onError);
+  const render = (data) =>  res.render('account', { user, title: 'Moje konto', roleName: user.rolename, packages: data.packages, userPackages: data.userPackages });
+  
+  db.task(getData)
+    .then(render);
 
 }));
 
@@ -151,35 +161,42 @@ app.post('/account/acquire-package', ensureAuthenticated, co.wrap(function*(req,
   const render = () => res.send(`user ${user.login} acquired package ${formDetails.package_id}`)    
 
   const queryString = `UPDATE user_details set package_id = ${formDetails.package_id}`;
-  dbService.queryDatabase(queryString)
-    .then(render)
-    .catch(onError);
 
+  db.none(queryString)
+  .then(render)
+  .catch((err) => onError(err, res));
+  
 }));
 
 app.get('/repositories', ensureAuthenticated, (req, res) => {
 
   const user = req.session.user;
 
-  const storeRepositories = (body) => {
+  const storeRepositories = (body) => { 
     let repositories = JSON.parse(body);
 
-    coForEach(repositories, function* (item, index) {
-      const queryString = `INSERT INTO repositories (user_id, git_project_id, project_name, full_project_name, html_url, description, api_url)
-        SELECT '${user.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
-        ON CONFLICT (git_project_id) DO UPDATE
-        SET project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}';`
+    db.tx(function(t) {
+      let queries = [];
 
-      yield dbService.queryDatabase(queryString);
+      repositories.forEach((item) => {
+        const queryString = t.none(`INSERT INTO repositories (user_id, git_project_id, project_name, full_project_name, html_url, description, api_url)
+          SELECT '${user.id}', '${item.id}','${item.name}', '${item.full_name}', '${item.html_url}', '${item.description}', '${item.url}'
+          ON CONFLICT (git_project_id) DO UPDATE
+          SET project_name='${item.name}', full_project_name='${item.full_name}', html_url='${item.html_url}', description='${item.description}', api_url='${item.url}';`)
 
+        queries.push(queryString); 
+      })
+
+      return t.batch(queries);
     })
-    res.render('repositories', { repositories: repositories });
+    .then(() => res.render('repositories', { repositories: repositories }))
+    .catch((err) => onError(err, res));
   }
 
   requestClient.get(`https://api.github.com/users/${user.login}/repos`)
     .then(storeRepositories)
-    .catch(onError);
-
+    .catch((err) => onError(err, res));    
+   
 });
 
 
@@ -189,7 +206,6 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
 
   const storeIssues = (body) => { 
     let issues = JSON.parse(body); 
-    printMessage(issues);
 
     coForEach(issues, function* (item, index) {
       const queryString = `INSERT INTO issues (url, repository_url, git_issue_id, title, user_id, body)
@@ -197,15 +213,18 @@ app.get(`/repositories/issues/:name`, ensureAuthenticated, (req, res) => {
         ON CONFLICT (git_issue_id) DO UPDATE
         SET url='${item.url}', repository_url='${item.repository_url}', git_issue_id='${item.id}', title='${item.title}', user_id='${user.id}', body='${item.body}'`;
 
-      yield dbService.queryDatabase(queryString);
+        return yield db.none(queryString)
+        .catch((err) => onError(err, res))
 
     })
-    res.render('issues', { issues: issues })
+    .then(()=> res.render('issues', { issues: issues }))
+    .catch((err) => onError(err, res))
+    
   }
 
   requestClient.get(`https://api.github.com/repos/${user.login}/${req.params.name}/issues`)
     .then(storeIssues)
-    .catch(onError)
+    .catch(onError);
 
 });
 
@@ -216,7 +235,7 @@ app.get(`/packages`, ensureAuthenticated, co.wrap(function*(req, res) {
   const queryString = `SELECT * FROM packages;`
   yield dbService.queryDatabase(queryString)
     .then(render)
-    .catch(onError);
+    .catch((err) => onError(err, res));
 
 }));
 
@@ -229,7 +248,8 @@ app.post(`/create-package`, ensureAuthenticated, co.wrap(function*(req, res){
 
   dbService.queryDatabase(queryString)
     .then(render)
-    .catch(onError);
+    .catch((err) => onError(err, res));
+    
 
 }));
 
@@ -249,8 +269,8 @@ function printMessage(name, obj) {
 
 }
 
-const onError = (e) => {
-  res.send(e)
+const onError = (e, res) => { 
   printMessage('onError', e);
+  res.send(e);
 };
 
