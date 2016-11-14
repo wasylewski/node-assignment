@@ -11,7 +11,7 @@ const dbService = new DBService();
 
 module.exports = function (app, passport, db) {
 
-//normal routes
+  //normal routes
 
   // show the home page
   app.get('/', (req, res) => {
@@ -27,8 +27,24 @@ module.exports = function (app, passport, db) {
       .catch((e) => printMessage('got error', e))
   });
 
-  // account section
-  app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
+  app.get('/account', ensureAuthenticated, co.wrap(getAccount));
+
+  function* getDataAccount(t) { console.log(t);
+    const queryPackages = `SELECT * FROM packages`;
+    const queryUserPackages = `SELECT packages.name FROM packages, user_details
+                          WHERE packages.id = user_details.package_id
+                          AND user_details.id = ${this.id};`
+    console.log(user)
+    let packages = yield t.many(queryPackages);
+    let userPackages = yield t.many(queryUserPackages);
+    console.log('getting data')
+    return {
+      packages: packages,
+      userPackages: userPackages
+    }
+  }
+
+  function* getAccount(req, res) {
     const user = req.session.user;
 
     const queryPackages = `SELECT * FROM packages`;
@@ -36,21 +52,52 @@ module.exports = function (app, passport, db) {
                           WHERE packages.id = user_details.package_id
                           AND user_details.id = ${user.id};`
 
-    function* getData(t) {
-      let packages = yield t.many(queryPackages);
-      let userPackages = yield t.many(queryUserPackages);
-      return {
-        packages: packages,
-        userPackages: userPackages
-      }
-    }
+
+    // let packages = yield t.many(queryPackages);
+    // let userPackages = yield t.many(queryUserPackages);
+
+    // function* getData(t) {
+    //   let packages = yield t.many(queryPackages);
+    //   let userPackages = yield t.many(queryUserPackages);
+    //   return {
+    //     packages: packages,
+    //     userPackages: userPackages
+    //   }
+    // }
 
     const render = (data) => res.render('account', { user, title: 'Moje konto', roleName: user.rolename, packages: data.packages, userPackages: data.userPackages });
 
-    db.task(getData)
-      .then(render);
+    db.task(co.wrap(getDataAccount.bind(user)))
+      .then(render)
+      .catch((err) => onError(err, res))
 
-  }));
+  }
+
+
+  // account section
+  // app.get('/account', ensureAuthenticated, co.wrap(function* (req, res) {
+  //   const user = req.session.user;
+
+  //   const queryPackages = `SELECT * FROM packages`;
+  //   const queryUserPackages = `SELECT packages.name FROM packages, user_details
+  //                         WHERE packages.id = user_details.package_id
+  //                         AND user_details.id = ${user.id};`
+
+  //   function* getData(t) {
+  //     let packages = yield t.many(queryPackages);
+  //     let userPackages = yield t.many(queryUserPackages);
+  //     return {
+  //       packages: packages,
+  //       userPackages: userPackages
+  //     }
+  //   }
+
+  //   const render = (data) => res.render('account', { user, title: 'Moje konto', roleName: user.rolename, packages: data.packages, userPackages: data.userPackages });
+
+  //   db.task(getData)
+  //     .then(render);
+
+  // }));
 
   // user route to acquire package
   app.post('/account/acquire-package', ensureAuthenticated, co.wrap(function* (req, res) {
@@ -201,16 +248,16 @@ module.exports = function (app, passport, db) {
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated()) { return next(); }
   res.redirect('/login');
-} 
+}
 
 function printMessage(name, obj) {
   console.dir(name, { depth: null, colors: true });
   if (obj) {
-     console.dir(obj, { depth: null, colors: true });
-  } 
+    console.dir(obj, { depth: null, colors: true });
+  }
 }
 
-function onError (e, res) { 
+function onError(e, res) {
   printMessage('onError', e);
   res.send(e);
 };

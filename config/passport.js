@@ -3,10 +3,6 @@
 const co = require('co');
 const GitHubStrategy = require('passport-github2').Strategy;
 const LocalStrategy = require('passport-local').Strategy;
-const GITHUB_CLIENT_ID = '5301c2ab0614cc72f15c';
-const GITHUB_CLIENT_SECRET = 'be52db4573cf12873a57117e59848307e0f0a37d';
-
-// const User = require('./user.js');
 
 const configAuth = require('./auth');
 
@@ -38,8 +34,8 @@ module.exports = (passport, db) => {
 
   // GITHUB AUTHENTICATION
   passport.use(new GitHubStrategy({
-    clientID: GITHUB_CLIENT_ID,
-    clientSecret: GITHUB_CLIENT_SECRET,
+    clientID: configAuth.githubAuth.GITHUB_CLIENT_ID,
+    clientSecret: configAuth.githubAuth.GITHUB_CLIENT_SECRET,
     callbackURL: "http://127.0.0.1:3000/auth/github/callback"
   },
     (accessToken, refreshToken, profile, done) => {
@@ -50,17 +46,12 @@ module.exports = (passport, db) => {
 
       const setUserProfile = (user) => {
         user.token = accessToken;
-        process.nextTick(() => {
-          console.log(user);
-          return done(null, user);
-        });
+        process.nextTick(() => done(null, user));
       }
 
       db.one(queryString, [true])
         .then(setUserProfile)
         .catch((err) => onError(err, res));
-
-
     }
   ));
 
