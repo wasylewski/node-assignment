@@ -8,7 +8,7 @@ class DBService {
 
   }
 
-  queryDatabase(queryString) { 
+  queryDatabase(queryString) {
     return new Promise((resolve, reject) => {
       let resultQuery = [];
       this.client = new pg.Client(this.connectionString);

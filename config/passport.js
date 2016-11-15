@@ -14,46 +14,49 @@ module.exports = (passport, db) => {
   passport.serializeUser((user, done) => done(null, user));
   passport.deserializeUser((obj, done) => done(null, obj));
 
-  // LOCAL LOGIN
-  passport.use(new LocalStrategy(co.wrap(function* (username, password, done) {
 
-    const queryString = `SELECT ud.*, roles.name as rolename from user_details as ud, roles 
-      where (ud.login = '${username}'
-      and ud.password = '${password}')
-      and roles.id = ud.role_id;`;
-
-    const successVerification = (user) => done(null, user);
-    const failedVerification = () => done(null, false);
-
-    db.one(queryString)
-      .then(successVerification)
-      .catch(failedVerification);
-  })));
-
-
-
-  // GITHUB AUTHENTICATION
-  passport.use(new GitHubStrategy({
+  const githubCredentials = {
     clientID: configAuth.githubAuth.GITHUB_CLIENT_ID,
     clientSecret: configAuth.githubAuth.GITHUB_CLIENT_SECRET,
-    callbackURL: "http://127.0.0.1:3000/auth/github/callback"
-  },
-    (accessToken, refreshToken, profile, done) => {
+    callbackURL: configAuth.githubAuth.GITHUB_CALLBACK_URL
+  }
 
-      const queryString = `select ud.*, roles.name as rolename from user_details as ud, roles
+  // GITHUB AUTHENTICATION
+  passport.use(new GitHubStrategy(githubCredentials, gitHubLogin));
+
+  function gitHubLogin(accessToken, refreshToken, profile, done) {
+
+    const queryString = `select ud.*, roles.name as rolename from user_details as ud, roles
                       where ud.login = '${profile._json.login}'
                       and roles.id = ud.role_id`;
 
-      const setUserProfile = (user) => {
-        user.token = accessToken;
-        process.nextTick(() => done(null, user));
-      }
-
-      db.one(queryString, [true])
-        .then(setUserProfile)
-        .catch((err) => onError(err, res));
+    const setUserProfile = (user) => {
+      user.token = accessToken;
+      process.nextTick(() => done(null, user));
     }
-  ));
+
+    db.one(queryString, [true])
+      .then(setUserProfile)
+      .catch((err) => onError(err, res));
+  }
+
+  // LOCAL LOGIN
+  passport.use(new LocalStrategy(co.wrap(localLogin)));
+
+  function* localLogin(username, password, next) {
+    try {
+      const queryString = `SELECT ud.*, roles.name AS rolename from user_details AS ud, roles 
+                            WHERE (ud.login = \${username}
+                            AND ud.password = \${password})
+                            AND roles.id = ud.role_id;`;
+
+      const user = yield db.one(queryString, { username, password });
+
+      return next(null, user);
+    } catch (e) {
+      next(e);
+    }
+  }
 
 }
 
